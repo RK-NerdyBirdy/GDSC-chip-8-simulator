@@ -56,20 +56,24 @@ def load_rom(rompath:str):
     
             
     except Exception as e:
-        print("error loading rom due to {e}")
+        print(f"error loading rom due to {e}")
         sys.exit(1)
 
 
 def emulate_cycle():
     #execute one cpu cycle (fetch,decode,execute)
+    global pc, sound_timer,delay_timer
     opcode = (mem[pc]<<8) | mem[pc+1]
     pc +=2
     execute_opcode(opcode)
 
     if delay_timer>0:
-        sound_timer -= 1
+        delay_timer -= 1
+    if sound_timer>0:
+        sound_timer -=1
 
 def execute_opcode(opcode:int):
+    global pc,I, delay_timer,sound_timer,w,h,wait_for_key,display,keypad,d_flag
     #execute given code
     x = (opcode & 0x0F00)>>8 #second nibble
     y = (opcode & 0x00F0) >>4 #third nibble
@@ -107,7 +111,7 @@ def execute_opcode(opcode:int):
         if V[x] != nn:
             pc +=2  # SNE Vx, byte: Skip if Vx != nn
 
-    elif l == 6000:
+    elif l == 0x5000:
         if V[x] == V[y]:
                     # SNE VX, VY: skp if VX = VY
             pc+=2
@@ -147,10 +151,10 @@ def execute_opcode(opcode:int):
             V[x] = (V[y] - V[x]) &0xFF
         elif n == 0xE:
             V[0xF] = (V[x]& 0x80)>>7 
-            V[x] = ((V[x]) <<1) &0xFF
+            V[x] = (V[x] <<1) &0xFF
         
         else:
-            print("Unknown opcode: {opcode:04X}")
+            print(f"Unknown opcode: {opcode:04X}")
 
     elif l == 0x9000:
         if V[x] != V[y]: 
@@ -159,12 +163,15 @@ def execute_opcode(opcode:int):
         I = nnn
     elif l == 0xB000:
         pc += nnn+ V[0]
+    
     elif l == 0xC000:
+        V[x] = random.randint(0,255)&nn
+    elif l == 0xD000:
         xcoord = V[x] % w
         ycoord = V[y] % h
         V[0xF] = 0
 
-        for row in range(h):
+        for row in range(n):
             if ycoord+row >= h:
                 break
             spbyte = mem[I+row]
@@ -179,7 +186,7 @@ def execute_opcode(opcode:int):
         
         d_flag =True
 
-    elif l == 0E000:
+    elif l == 0xE000:
         if nn == 0x9E:
             if keypad[V[x] & 0xF] !=0:
                 pc +=2
@@ -229,6 +236,7 @@ def execute_opcode(opcode:int):
 
             
 def handle_key_d(key:int):
+    global wait_for_key, key_register,keypad
     keypad[key] = 1
     if wait_for_key:
         V[key_register] = key
@@ -236,6 +244,7 @@ def handle_key_d(key:int):
         pc +=2
 
 def handle_key_up(key:int):
+    global keypad
     keypad[key] = 0
 
 
@@ -266,5 +275,42 @@ keymapping = {
 
 clock = pygame.time.Clock()
 
+def update_display():
+    screen.fill((0,0,0)) #cls
+    global pxl_size 
+    for y in range(h):
+        for x in range(w):
+            if display[y][x]==1:
+                pygame.draw.rect(screen, (255,255,255), (x* pxl_size, y* pxl_size, pxl_size,pxl_size))
 
+    pygame.display.flip()
+
+running = True
+while running:
+
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                running = False
+            elif event.key in keymapping:
+                handle_key_d(keymapping[event.key])
+        elif event.type == pygame.KEYUP:
+            if event.key in keymapping:
+                handle_key_up(keymapping[event.key])
+    
+    if not wait_for_key:
+        emulate_cycle()
+    
+    if d_flag:
+        update_display()
+        d_flag=False
+    
+    clock.tick(cspeed)
+pygame.quit()
+    
+
+
+         
 
